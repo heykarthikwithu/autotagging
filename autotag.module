@@ -1,0 +1,212 @@
+<?php
+
+function autotag_menu() {
+  $items ['admin/custom_update_nodes'] = array(
+    'title' => 'custom_update_nodes',
+    'page callback' => 'custom_update_nodes',
+    'access arguments' => array('access content'),
+    'type' => MENU_CALLBACK,
+  );
+  $items['admin/custom_batch_update_nodes'] = array(
+    'title' => 'Custm Batches',
+    'description' => 'Run batch operations.',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('custom_batch_update_nodes'),
+    'access arguments' => array('access content'),
+    'type' => MENU_NORMAL_ITEM,
+   );
+  return $items;
+}
+function custom_update_nodes() {
+  $nodes = node_load_multiple(array(), array('type' => "article"));
+  $node_count = count($nodes);
+  foreach($nodes as $nid => $node) {
+    $node_tids_all = array_map("unserialize", array_unique(array_map("serialize", $node->field_category["und"])));
+    $node->field_category["und"] = $node_tids_all;
+    node_save($node);
+  }
+  drupal_goto("/admin/content");
+  drupal_set_message(t('Nodes updated'));
+}
+/*
+$num_deleted = db_delete('node')
+  ->condition('type', "article")
+  ->execute();*/
+echo "done";
+die;
+  echo "s";
+  $a = "Bangalore";
+  $voc = taxonomy_vocabulary_machine_name_load("category");
+  $terms = taxonomy_term_load_multiple(array(), array('vid' => $voc->vid));
+  //echo "<pre>"; print_R($terms); die;
+  $action = rules_invoke_component("rules_rules_autotag_rule", $a, $terms);
+  echo "<pre>"; print_R($action); die;
+
+  $type = "article";
+  $nodes = node_load_multiple(array(), array('type' => $type)); 
+  foreach($nodes as $node) {
+    node_save($node);
+  }
+  return "Success";
+}
+
+function custom_batch_update_nodes($form, $form_state){
+  $form = array();
+  $form["text"]["#markup"] = "Update content.....";
+  $form['submit'] = array('#type' => 'submit', '#value' => t('Click here to Start'));
+  return $form;
+}
+function custom_batch_update_nodes_submit($form, $form_state){
+  batch_set(custom_batch_update_all_nodes());
+}
+function custom_batch_update_all_nodes(){
+  drupal_set_message('Updating Nodes');
+  $nodes = node_load_multiple(array(), array('type' => "article"));
+  $node_count = count($nodes);
+  foreach($nodes as $nid => $node) {
+    $operations[] = array('custom_batch_update_each_nodes', array($node));
+  }
+  $batch = array(
+    'operations' => $operations,
+    'finished' => 'custom_batch_update_all_nodes_finished',
+  );
+  return $batch;
+}
+function custom_batch_update_each_nodes($node, &$context) {
+  $context['results'][] = $nid . ' : ' . check_plain($node->title);
+  $context['message'] = t('Processing node "@title"', array('@title' => $node->title));
+  $nodeupdated = updated_node($node);
+  $updated = TRUE;
+  if ($updated) {
+    node_save($nodeupdated);
+    $path = drupal_lookup_path("alias", "node/" . $nid);
+    drupal_set_message(	$nid . "  <a href='/$path'>" . $node->title . "</a> updated.");
+  }
+}
+function custom_batch_update_all_nodes_finished($success, $results, $operations) {
+  if ($success) {
+    drupal_set_message(t('@count nodes  processed.', array('@count' => count($results))));
+  } else {
+    $error_operation = reset($operations);
+    drupal_set_message(t('An error occurred while processing @operation with arguments : @args', array('@operation' => $error_operation[0], '@args' => print_r($error_operation[0], TRUE))));
+  }
+}
+
+function updated_node($node) {
+
+  $node_type = "page";
+  //$fields = field_info_instances("node", $node_type);
+  //echo "<pre>"; print_R($fields); die;
+
+  $field = field_info_field('field_category');
+  //echo "<pre>"; print_R($field); die;
+  $voc_name = $field["settings"]["allowed_values"][0]["vocabulary"];
+
+  $voc = taxonomy_vocabulary_machine_name_load($voc_name);
+  $voc = taxonomy_vocabulary_machine_name_load("category");
+  $terms = taxonomy_term_load_multiple(array(), array('vid' => $voc->vid));
+  //echo "<pre>"; print_R($terms); die;
+  $termnames = array();
+  foreach($terms as $termskey => $termsvalue) {
+    //echo "<pre>"; print_R($termsvalue->name); 
+    $termnames[$termskey] = $termsvalue->name;
+  }
+  //die;
+  //echo "<pre>"; print_R($termnames); die;
+
+  $node_title = $node->title;
+  $node_title .= $node->body["und"][0]["value"];
+  $node_tids = array();
+  foreach($termnames as $termname) {
+    if (stripos($node_title, $termname) !== false) {
+      //echo 'true';
+      $term = taxonomy_get_term_by_name($termname);
+      foreach($term as $termkey => $termvalue) {
+        //echo "<pre>"; print_R($termvalue); die;
+        //$node_tids[] = array("tid" => $termvalue->tid);
+        $node_tids[] = (array) $termvalue;
+      }
+    }
+    //else echo "false";
+
+  }
+  
+
+  $node_tids_all = array();
+  if(!empty($node->field_category)) {
+    $node_tids_all = array_merge_recursive($node_tids, $node->field_category["und"]);
+  }
+  else {
+    $node_tids_all = $node_tids;
+  }
+  //$node_tids_all = array_unique($node_tids_all[]);
+  $node_tids_all = array_map("unserialize", array_unique(array_map("serialize", $node_tids_all)));
+
+  //echo "<pre>"; print_R($node_tids_all); die;
+  $node->field_category["und"] = $node_tids_all;
+  //echo "<pre>"; print_R($node); die;
+  
+  return $node;
+}
+
+
+
+/*
+// Working code for autotag
+function custom_node_presave($node) {
+
+  $node_type = "page";
+  //$fields = field_info_instances("node", $node_type);
+  //echo "<pre>"; print_R($fields); die;
+
+  $field = field_info_field('field_tags');
+  //echo "<pre>"; print_R($field); die;
+  $voc_name = $field["settings"]["allowed_values"][0]["vocabulary"];
+
+  $voc = taxonomy_vocabulary_machine_name_load($voc_name);
+  $voc = taxonomy_vocabulary_machine_name_load("tags");
+  $terms = taxonomy_term_load_multiple(array(), array('vid' => $voc->vid));
+  //echo "<pre>"; print_R($terms); die;
+  $termnames = array();
+  foreach($terms as $termskey => $termsvalue) {
+    //echo "<pre>"; print_R($termsvalue->name); 
+    $termnames[$termskey] = $termsvalue->name;
+  }
+  //die;
+  //echo "<pre>"; print_R($termnames); die;
+
+  $node_title = $node->title;
+  $node_tids = array();
+  foreach($termnames as $termname) {
+    if (strpos($node_title, $termname) !== false) {
+      //echo 'true';
+      $term = taxonomy_get_term_by_name($termname);
+      foreach($term as $termkey => $termvalue) {
+        //echo "<pre>"; print_R($termvalue); die;
+        //$node_tids[] = array("tid" => $termvalue->tid);
+        $node_tids[] = (array) $termvalue;
+      }
+    }
+    //else echo "false";
+
+  }
+  
+
+  $node_tids_all = array();
+  if(!empty($node->field_tags)) {
+    $node_tids_all = array_merge_recursive($node->field_tags["und"], $node_tids);
+  }
+  else {
+    $node_tids_all = $node_tids;
+  }
+  //$node_tids_all = array_unique($node_tids_all[]);
+  $node_tids_all = array_map("unserialize", array_unique(array_map("serialize", $node_tids_all)));
+
+  //echo "<pre>"; print_R($node_tids_all); die;
+  $node->field_tags["und"] = $node_tids_all;
+  //echo "<pre>"; print_R($node); die;
+
+}
+*/
+
+
